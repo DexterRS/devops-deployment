@@ -8,6 +8,10 @@ permissions:
   contents: read
   packages: write
 
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: dexterrs/custom-webapp   
+
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
@@ -16,12 +20,13 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Login to GitHub Container Registry (GHCR)
+      # Use GITHUB_TOKEN for pushing to GHCR (simpler + works with packages: write)
+      - name: Login to GHCR (for push)
         uses: docker/login-action@v3
         with:
-          registry: ghcr.io
+          registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
-          password: ${{ secrets.GHCR_PAT }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build and push Docker image
         uses: docker/build-push-action@v6
@@ -29,8 +34,8 @@ jobs:
           context: ./app
           push: true
           tags: |
-            ghcr.io/${{ github.repository_owner }}/custom-webapp:latest
-            ghcr.io/${{ github.repository_owner }}/custom-webapp:${{ github.sha }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
 
       - name: Deploy on EC2 (pull + restart container)
         uses: appleboy/ssh-action@v1.0.3
@@ -40,10 +45,16 @@ jobs:
           key: ${{ secrets.EC2_SSH_KEY }}
           script: |
             set -e
+
+            # Login on EC2 to pull from GHCR (PAT needed here)
             echo "${{ secrets.GHCR_PAT }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
-            docker pull ghcr.io/${{ github.repository_owner }}/custom-webapp:latest
+
+            docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+
             docker stop webapp || true
             docker rm webapp || true
+
             docker run -d --name webapp -p 80:80 --restart always \
-              ghcr.io/${{ github.repository_owner }}/custom-webapp:latest
+              ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+
             docker image prune -f
