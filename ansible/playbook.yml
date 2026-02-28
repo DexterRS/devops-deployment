@@ -1,0 +1,65 @@
+---
+- name: Deploy Custom Web App
+  hosts: web
+  become: yes
+
+  tasks:
+    - name: Update apt packages
+      apt:
+        update_cache: yes
+
+    - name: Install Docker
+      apt:
+        name: docker.io
+        state: present
+
+    - name: Start Docker service
+      service:
+        name: docker
+        state: started
+        enabled: yes
+
+    - name: Add ubuntu user to docker group
+      user:
+        name: ubuntu
+        groups: docker
+        append: yes
+
+    - name: Create app directory on server
+      file:
+        path: /home/ubuntu/app
+        state: directory
+        owner: ubuntu
+        group: ubuntu
+        mode: "0755"
+
+    - name: Copy app files to server
+      copy:
+        src: ../app/
+        dest: /home/ubuntu/app/
+        owner: ubuntu
+        group: ubuntu
+
+    - name: Verify Dockerfile exists
+      stat:
+        path: /home/ubuntu/app/Dockerfile
+      register: dockerfile_stat
+
+    - name: Fail if Dockerfile missing
+      fail:
+        msg: "Dockerfile not found. Ensure you have ../app/Dockerfile on your local machine."
+      when: not dockerfile_stat.stat.exists
+
+    - name: Build Docker image
+      command: docker build -t custom-webapp /home/ubuntu/app
+
+    - name: Stop existing container if running
+      command: docker stop webapp
+      ignore_errors: yes
+
+    - name: Remove existing container if exists
+      command: docker rm webapp
+      ignore_errors: yes
+
+    - name: Run custom container
+      command: docker run -d --name webapp -p 80:80 --restart always custom-webapp
